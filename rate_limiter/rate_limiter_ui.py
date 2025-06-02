@@ -1,3 +1,4 @@
+from datetime import datetime
 import streamlit as st
 
 
@@ -119,6 +120,7 @@ class RateLimiterUI:
     @staticmethod
     def render_history(limiter):
         """渲染歷史記錄區域"""
+        print(f"DEBUG: render_history 被呼叫了！時間: {datetime.now()}")
         if limiter.request_history:
             st.subheader("📜 請求歷史記錄")
 
@@ -242,3 +244,126 @@ class RateLimiterUI:
                 limiter.reset()
                 st.success("系統已重置！")
                 st.rerun()
+
+    def render_leaky_bucket_settings(self, algorithm_name):
+        """渲染 Leaky Bucket 專用設定"""
+        st.subheader("⚙️ Leaky Bucket 設定")
+        col1, col2, col3 = st.columns([2, 2, 1])
+
+        with col1:
+            capacity = st.number_input("桶子容量 (請求)", 1, 100, 10, key=f"{algorithm_name}_capacity")
+        with col2:
+            leak_rate = st.number_input("漏出速率 (請求/秒)", 0.1, 50.0, 2.0, step=0.1, key=f"{algorithm_name}_rate")
+        with col3:
+            auto_refresh = st.checkbox("🔄 自動刷新", value=True, key=f"{algorithm_name}_refresh")
+
+        return capacity, leak_rate, auto_refresh
+
+    def render_leaky_bucket_status(self, limiter):
+        """渲染 Leaky Bucket 狀態顯示"""
+        status = limiter.get_status()
+
+        st.subheader(f"🕳️ {status['algorithm']} 狀態")
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("排隊數量", f"{status['queue_size']:.1f}")
+        with col2:
+            st.metric("桶子容量", status['capacity'])
+        with col3:
+            st.metric("漏出速率", f"{status['leak_rate']}/秒")
+        with col4:
+            st.metric("清空時間", f"{status['time_to_empty']:.1f}秒")
+
+        # 桶子使用率
+        usage_rate = status['queue_size'] / status['capacity']
+        st.write(f"**桶子使用率:** {usage_rate*100:.1f}% ({status['queue_size']:.1f}/{status['capacity']})")
+        st.progress(usage_rate)
+
+        # 視覺化排隊狀態
+        if status['queue_size'] > 0:
+            st.write("💧 **漏出進度:**")
+            leak_progress = 1 - (status['time_to_empty'] / (status['queue_size'] /
+                                                            status['leak_rate'])) if status['queue_size'] > 0 else 0
+            st.progress(max(0, leak_progress))
+
+        return status
+
+    def render_leaky_bucket_user_testing(self, limiter, algorithm_name):
+        """渲染 Leaky Bucket 用戶測試區域"""
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            st.subheader("👥 用戶測試")
+
+            # 用戶選擇和發送請求
+            user_col1, user_col2, user_col3 = st.columns([2, 1, 1])
+
+            with user_col1:
+                users = ["Alice", "Bob", "Charlie", "Diana", "Eve"]
+                selected_user = st.selectbox("選擇用戶", users, key=f"{algorithm_name}_user")
+
+            with user_col2:
+                queue_cost = st.number_input("排隊數量", 1, 10, 1, key=f"{algorithm_name}_cost")
+
+            with user_col3:
+                if st.button(f"🚰 排隊 {queue_cost} 個", type="primary", key=f"{algorithm_name}_send"):
+                    allowed, extra_info = limiter.is_allowed(selected_user, queue_cost)
+
+                    if allowed:
+                        st.success(f"✅ {selected_user} 成功排隊 {queue_cost} 個請求！")
+                    else:
+                        st.error(f"❌ {selected_user} 排隊失敗！桶子已滿")
+
+                    st.rerun()
+
+            # 快速測試按鈕
+            st.subheader("⚡ 快速測試")
+            test_col1, test_col2, test_col3 = st.columns(3)
+
+            with test_col1:
+                if st.button("連續排隊測試", key=f"{algorithm_name}_queue1"):
+                    results = []
+                    for i in range(5):
+                        allowed, _ = limiter.is_allowed(selected_user, 1)
+                        results.append("✅" if allowed else "❌")
+                    st.write(f"5次排隊: {' '.join(results)}")
+                    st.rerun()
+
+            with test_col2:
+                if st.button("大量排隊測試", key=f"{algorithm_name}_queue2"):
+                    allowed, _ = limiter.is_allowed(selected_user, 5)
+                    st.write(f"一次排隊5個: {'✅' if allowed else '❌'}")
+                    st.rerun()
+
+            with test_col3:
+                if st.button("多用戶排隊", key=f"{algorithm_name}_multi"):
+                    results = []
+                    for user in users:
+                        allowed, _ = limiter.is_allowed(user, 1)
+                        results.append(f"{user}: {'✅' if allowed else '❌'}")
+                    for result in results:
+                        st.write(result)
+                    st.rerun()
+
+        with col2:
+            # 控制區域
+            st.subheader("🎮 控制")
+
+            if st.button("🗑️ 重置系統", type="secondary", key=f"{algorithm_name}_reset"):
+                limiter.reset()
+                st.success("系統已重置！")
+                st.rerun()
+
+            # 桶子狀態可視化
+            st.subheader("🪣 桶子狀態")
+            status = limiter.get_status()
+
+            # 簡單的文字可視化
+            filled_slots = int((status['queue_size'] / status['capacity']) * 10)
+            empty_slots = 10 - filled_slots
+
+            bucket_visual = "🟦" * filled_slots + "⬜" * empty_slots
+            st.write("桶子狀態:")
+            st.write(bucket_visual)
+            st.caption(f"排隊: {status['queue_size']:.1f}/{status['capacity']}")

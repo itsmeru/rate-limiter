@@ -1,5 +1,6 @@
 import time
 from fixed_window_limiter import FixedWindowRateLimiter
+from leaky_bucket_limiter import LeakyBucketLimiter
 from token_bucket_limiter import TokenBucketLimiter
 from sliding_window_limiter import SlidingWindowLimiter
 from rate_limiter_ui import RateLimiterUI
@@ -28,8 +29,8 @@ def main():
         render_sliding_window_page()
     elif algorithm == "Token Bucket":
         render_token_bucket_page()
-    # elif algorithm == "Leaky Bucket":
-    #     st.info("🚧 Leaky Bucket 即將推出...")
+    elif algorithm == "Leaky Bucket":
+        render_leaky_bucket_page()
 
 
 def render_fixed_window_page():
@@ -124,6 +125,30 @@ def render_token_bucket_page():
     ui.render_history(limiter)
 
     if auto_refresh:
+        time.sleep(1)
+        st.rerun()
+
+
+def render_leaky_bucket_page():
+    """渲染 Leaky Bucket 頁面"""
+    st.markdown("**原理：** 漏桶，請求排隊，以固定速率處理，平滑流量")
+
+    ui = RateLimiterUI()
+    capacity, leak_rate, auto_refresh = ui.render_leaky_bucket_settings("leaky_bucket")
+
+    if 'leaky_limiter' not in st.session_state:
+        st.session_state.leaky_limiter = LeakyBucketLimiter(capacity, leak_rate)
+    else:
+        st.session_state.leaky_limiter.capacity = capacity
+        st.session_state.leaky_limiter.leak_rate = leak_rate
+
+    limiter = st.session_state.leaky_limiter
+    status = ui.render_leaky_bucket_status(limiter)
+    st.markdown("---")
+    ui.render_leaky_bucket_user_testing(limiter, "leaky_bucket")
+    ui.render_history(limiter)
+
+    if auto_refresh and status.get('queue_size', 0) > 0:
         time.sleep(1)
         st.rerun()
 
