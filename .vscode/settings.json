@@ -1,0 +1,21 @@
+{
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "ms-python.autopep8",
+    "autopep8.args": [
+        "--max-line-length",
+        "120"
+    ],
+    // 使用空格而非 Tab
+    "editor.insertSpaces": true,
+    "editor.tabSize": 4,
+    "workbench.colorCustomizations": {
+        "titleBar.activeBackground": "#707038",
+        "titleBar.activeForeground": "#ffffff",
+        "statusBar.background": "#707038", 
+        "sideBar.foreground":"#75809C",
+    },
+    "[json]": {
+        "editor.defaultFormatter": "vscode.json-language-features"
+    }
+}
+
