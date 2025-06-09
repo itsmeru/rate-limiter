@@ -5,8 +5,6 @@ import time
 import json
 from datetime import datetime
 from base_limiter import BaseLimiter
-from dotenv import load_dotenv
-load_dotenv()
 
 
 class FixedWindowRateLimiter(BaseLimiter):
@@ -16,19 +14,73 @@ class FixedWindowRateLimiter(BaseLimiter):
 
         if redis_client:
             self.redis_client = redis_client
+            print("✅ 使用提供的 Redis 客戶端")
         else:
-            # 只使用 REDIS_URL 連接
-            redis_url = os.getenv('REDIS_URL')
-            self.redis_client = redis.from_url(
-                redis_url,
-                decode_responses=True,
-                socket_timeout=10,
-                socket_connect_timeout=10,
-                retry_on_timeout=True
-            )
+            # 詳細診斷 Redis 連接
+            self.redis_client = self._create_redis_connection()
 
         self.lock = threading.Lock()
         self.history_key = "rate_limit_history"
+
+        # 測試連接
+        try:
+            result = self.redis_client.ping()
+            print(f"✅ Redis 連接測試成功: {result}")
+        except Exception as e:
+            print(f"❌ Redis 連接測試失敗: {e}")
+            raise e
+
+    def _create_redis_connection(self):
+        """創建 Redis 連接，使用正確的 TLS 設定"""
+        print("🔍 開始創建 Redis 連接...")
+
+        # 獲取 REDIS_URL
+        redis_url = None
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets'):
+                redis_url = st.secrets.get('REDIS_URL')
+        except:
+            pass
+
+        if not redis_url:
+            redis_url = os.getenv('REDIS_URL')
+
+        if not redis_url:
+            raise ValueError("❌ 無法找到 REDIS_URL 配置")
+
+        print(f"Redis URL 前綴: {redis_url[:30]}...")
+
+        # 由於 CLI 需要 --tls，我們需要手動解析 URL 並設定 SSL
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(redis_url)
+
+            print(f"解析結果: host={parsed.hostname}, port={parsed.port}")
+
+            # 為 Upstash 創建 Redis 連接，強制使用 SSL
+            client = redis.Redis(
+                host=parsed.hostname,
+                port=parsed.port or 6379,
+                password=parsed.password,
+                username=parsed.username or 'default',
+                ssl=True,                    # 強制使用 SSL，對應 CLI 的 --tls
+                ssl_check_hostname=False,    # 對 Upstash 很重要
+                ssl_cert_reqs=None,          # 不驗證證書
+                decode_responses=True,
+                socket_connect_timeout=30,
+                socket_timeout=30,
+                retry_on_timeout=True
+            )
+
+            print("🧪 測試連接...")
+            result = client.ping()
+            print(f"✅ 連接成功: {result}")
+            return client
+
+        except Exception as e:
+            print(f"❌ 連接失敗: {e}")
+            raise e
 
     def is_allowed(self, client_id):
         current_time = time.time()
@@ -123,3 +175,19 @@ class FixedWindowRateLimiter(BaseLimiter):
 
         except Exception as e:
             print(f"⚠️ Redis reset 失敗: {e}")
+
+
+# 獨立測試函數
+def test_redis_connection_detailed():
+    """詳細的 Redis 連接測試"""
+    print("=" * 50)
+    print("🧪 Redis 連接詳細診斷")
+    print("=" * 50)
+
+    try:
+        limiter = FixedWindowRateLimiter(5, 60)
+        print("✅ Rate Limiter 創建成功")
+        return True
+    except Exception as e:
+        print(f"❌ 創建失敗: {e}")
+        return False
