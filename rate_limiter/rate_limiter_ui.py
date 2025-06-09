@@ -3,22 +3,7 @@ import streamlit as st
 
 
 class RateLimiterUI:
-    """可重用的 Rate Limiter UI 組件"""
-
-    @staticmethod
-    def render_settings(algorithm_name, default_max_requests=10, default_window_size=60):
-        """渲染設定區域"""
-        st.subheader("⚙️ 設定")
-        col1, col2, col3 = st.columns([2, 2, 1])
-
-        with col1:
-            max_requests = st.number_input("最大請求數", 1, 50, default_max_requests, key=f"{algorithm_name}_max")
-        with col2:
-            window_size = st.number_input("窗口大小 (秒)", 1, 300, default_window_size, key=f"{algorithm_name}_window")
-        with col3:
-            auto_refresh = st.checkbox("🔄 自動刷新", value=True, key=f"{algorithm_name}_refresh")
-
-        return max_requests, window_size, auto_refresh
+    """可重用的 Rate Limiter UI 組件（簡化版）"""
 
     @staticmethod
     def render_status(limiter):
@@ -35,12 +20,62 @@ class RateLimiterUI:
         with col3:
             st.metric("剩餘", status['remaining'])
         with col4:
-            if status['algorithm'] == 'Fixed Window':
-                st.metric("剩餘時間", f"{status['time_remaining']:.1f}秒")
-        # 使用率
+            if 'time_remaining' in status and status['time_remaining'] > 0:
+                time_remaining = status['time_remaining']
+                if time_remaining > 60:
+                    time_display = f"{time_remaining/60:.1f}分"
+                else:
+                    time_display = f"{time_remaining:.0f}秒"
+                st.metric("窗口重置", time_display)
+            else:
+                st.metric("窗口狀態", "✅ 可重置")
+
+        # 使用率計算和進度條
         usage_rate = status['current_count'] / status['max_requests']
-        st.write(f"**使用率:** {usage_rate*100:.1f}% ({status['current_count']}/{status['max_requests']})")
-        st.progress(usage_rate)
+        usage_percentage = usage_rate * 100
+
+        # 限制進度條值在 0.0-1.0 之間
+        progress_value = min(usage_rate, 1.0)
+
+        st.write(f"**使用率:** {usage_percentage:.1f}% ({status['current_count']}/{status['max_requests']})")
+        st.progress(progress_value)
+
+        # 如果超過限制，顯示警告
+        if usage_rate > 1.0:
+            st.error(f"⚠️ 已超出限制！超出 {(usage_rate - 1.0) * 100:.1f}%")
+        elif usage_rate > 0.8:
+            st.warning("⚠️ 接近限制")
+
+        # 倒數計時視覺化（靜態顯示）
+        if 'time_remaining' in status and status['time_remaining'] > 0:
+            st.write("⏰ **窗口重置倒數:**")
+
+            # 計算倒數進度
+            window_size = getattr(limiter, 'window_size', 60)
+            countdown_progress = 1 - (status['time_remaining'] / window_size)
+            countdown_progress = max(0.0, min(1.0, countdown_progress))
+
+            st.progress(countdown_progress)
+
+            # 倒數數字顯示
+            if status['time_remaining'] > 60:
+                time_text = f"還有 {status['time_remaining']/60:.1f} 分鐘後重置"
+            elif status['time_remaining'] > 10:
+                time_text = f"還有 {status['time_remaining']:.0f} 秒後重置"
+            else:
+                time_text = f"還有 {status['time_remaining']:.1f} 秒後重置"
+
+            st.caption(time_text)
+
+            # 提示用戶手動刷新
+            if status['time_remaining'] < 10:
+                st.info("🔄 接近重置時間，點擊手動刷新查看最新狀態")
+
+        else:
+            if status.get('remaining', 0) <= 0:
+                st.success("✅ 窗口已可重置！")
+            else:
+                st.info("ℹ️ 窗口內還有可用請求")
 
         return status
 
@@ -120,13 +155,12 @@ class RateLimiterUI:
     @staticmethod
     def render_history(limiter):
         """渲染歷史記錄區域"""
-        print(f"DEBUG: render_history 被呼叫了！時間: {datetime.now()}")
         if limiter.request_history:
             st.subheader("📜 請求歷史記錄")
 
             # 以表格形式顯示
             history_data = []
-            for record in reversed(limiter.request_history[-10:]):  # 最近10筆
+            for record in limiter.request_history[:10]:  # 最近10筆，最新在前
                 status_icon = "✅" if record['status'] == '成功' else "❌"
                 reset_info = " (窗口重置)" if record.get('window_reset') else ""
                 history_data.append({
@@ -141,20 +175,6 @@ class RateLimiterUI:
                 st.table(history_data)
         else:
             st.info("📝 尚無請求記錄")
-
-    def render_token_bucket_settings(self, algorithm_name):
-        """渲染 Token Bucket 專用設定"""
-        st.subheader("⚙️ Token Bucket 設定")
-        col1, col2, col3 = st.columns([2, 2, 1])
-
-        with col1:
-            capacity = st.number_input("桶子容量 (tokens)", 1, 100, 10)
-        with col2:
-            refill_rate = st.number_input("補充速率 (tokens/秒)", 0.1, 50.0, 2.0)
-        with col3:
-            auto_refresh = st.checkbox("🔄 自動刷新", value=True)
-
-        return capacity, refill_rate, auto_refresh
 
     def render_token_bucket_status(self, limiter):
         """渲染 Token Bucket 狀態顯示"""
@@ -172,10 +192,33 @@ class RateLimiterUI:
         with col4:
             st.metric("填滿時間", f"{status['time_to_fill']:.1f}秒")
 
-        # Token 使用率（反向：tokens 越多使用率越低）
+        # Token 使用率計算
         usage_rate = status['current_tokens'] / status['capacity']
-        st.write(f"**Token 存量:** {usage_rate*100:.1f}% ({status['current_tokens']:.1f}/{status['capacity']})")
-        st.progress(usage_rate)
+        usage_percentage = usage_rate * 100
+
+        # 確保進度條值在 0.0-1.0 之間
+        progress_value = max(0.0, min(usage_rate, 1.0))
+
+        st.write(f"**Token 存量:** {usage_percentage:.1f}% ({status['current_tokens']:.1f}/{status['capacity']})")
+        st.progress(progress_value)
+
+        # Token 補充狀態
+        if status['current_tokens'] < status['capacity']:
+            st.write("🔄 **Token 補充狀態:**")
+
+            # 計算補充進度
+            refill_progress = status['current_tokens'] / status['capacity']
+            st.progress(refill_progress)
+
+            if status['time_to_fill'] > 60:
+                fill_text = f"完全填滿還需 {status['time_to_fill']/60:.1f} 分鐘"
+            else:
+                fill_text = f"完全填滿還需 {status['time_to_fill']:.1f} 秒"
+
+            st.caption(fill_text)
+            st.info("💡 點擊手動刷新查看 Token 補充狀態")
+        else:
+            st.success("✅ Token 桶已滿！")
 
         return status
 
@@ -245,20 +288,6 @@ class RateLimiterUI:
                 st.success("系統已重置！")
                 st.rerun()
 
-    def render_leaky_bucket_settings(self, algorithm_name):
-        """渲染 Leaky Bucket 專用設定"""
-        st.subheader("⚙️ Leaky Bucket 設定")
-        col1, col2, col3 = st.columns([2, 2, 1])
-
-        with col1:
-            capacity = st.number_input("桶子容量 (請求)", 1, 100, 10, key=f"{algorithm_name}_capacity")
-        with col2:
-            leak_rate = st.number_input("漏出速率 (請求/秒)", 0.1, 50.0, 2.0, step=0.1, key=f"{algorithm_name}_rate")
-        with col3:
-            auto_refresh = st.checkbox("🔄 自動刷新", value=True, key=f"{algorithm_name}_refresh")
-
-        return capacity, leak_rate, auto_refresh
-
     def render_leaky_bucket_status(self, limiter):
         """渲染 Leaky Bucket 狀態顯示"""
         status = limiter.get_status()
@@ -275,17 +304,46 @@ class RateLimiterUI:
         with col4:
             st.metric("清空時間", f"{status['time_to_empty']:.1f}秒")
 
-        # 桶子使用率
+        # 桶子使用率計算
         usage_rate = status['queue_size'] / status['capacity']
-        st.write(f"**桶子使用率:** {usage_rate*100:.1f}% ({status['queue_size']:.1f}/{status['capacity']})")
-        st.progress(usage_rate)
+        usage_percentage = usage_rate * 100
 
-        # 視覺化排隊狀態
-        if status['queue_size'] > 0:
+        # 確保進度條值在 0.0-1.0 之間
+        progress_value = max(0.0, min(usage_rate, 1.0))
+
+        st.write(f"**桶子使用率:** {usage_percentage:.1f}% ({status['queue_size']:.1f}/{status['capacity']})")
+        st.progress(progress_value)
+
+        # 如果超過容量，顯示警告
+        if usage_rate > 1.0:
+            st.error(f"⚠️ 桶子溢出！超出 {(usage_rate - 1.0) * 100:.1f}%")
+
+        # 漏出進度條
+        if status['queue_size'] > 0 and status['leak_rate'] > 0:
             st.write("💧 **漏出進度:**")
-            leak_progress = 1 - (status['time_to_empty'] / (status['queue_size'] /
-                                                            status['leak_rate'])) if status['queue_size'] > 0 else 0
-            st.progress(max(0, leak_progress))
+
+            # 基於剩餘時間的倒數進度條
+            max_wait_time = status['capacity'] / status['leak_rate']
+
+            if max_wait_time > 0 and status['time_to_empty'] <= max_wait_time:
+                progress = 1 - (status['time_to_empty'] / max_wait_time)
+                progress = max(0.0, min(1.0, progress))
+
+                st.progress(progress)
+
+                # 倒數計時文字
+                if status['time_to_empty'] > 60:
+                    time_text = f"⏰ 還需等待 {status['time_to_empty']/60:.1f} 分鐘清空"
+                else:
+                    time_text = f"⏰ 還需等待 {status['time_to_empty']:.1f} 秒清空"
+
+                st.caption(f"{time_text} (進度: {progress*100:.1f}%)")
+                st.info("💡 點擊手動刷新查看漏出進度")
+            else:
+                st.progress(1.0)
+                st.caption("✅ 即將清空")
+        else:
+            st.write("💧 **漏出狀態:** 桶子空閒")
 
         return status
 
@@ -360,10 +418,12 @@ class RateLimiterUI:
             status = limiter.get_status()
 
             # 簡單的文字可視化
-            filled_slots = int((status['queue_size'] / status['capacity']) * 10)
-            empty_slots = 10 - filled_slots
+            if status['capacity'] > 0:
+                filled_slots = int((status['queue_size'] / status['capacity']) * 10)
+                filled_slots = max(0, min(10, filled_slots))
+                empty_slots = 10 - filled_slots
 
-            bucket_visual = "🟦" * filled_slots + "⬜" * empty_slots
-            st.write("桶子狀態:")
-            st.write(bucket_visual)
-            st.caption(f"排隊: {status['queue_size']:.1f}/{status['capacity']}")
+                bucket_visual = "🟦" * filled_slots + "⬜" * empty_slots
+                st.write("桶子狀態:")
+                st.write(bucket_visual)
+                st.caption(f"排隊: {status['queue_size']:.1f}/{status['capacity']}")
