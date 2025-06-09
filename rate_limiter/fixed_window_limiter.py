@@ -1,47 +1,32 @@
+import os
 import redis
 import threading
 import time
 import json
-import os
 from datetime import datetime
 from base_limiter import BaseLimiter
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class FixedWindowRateLimiter(BaseLimiter):
     def __init__(self, max_requests, window_size, redis_client=None):
         self.max_requests = max_requests
         self.window_size = window_size
-
-        # 使用提供的 Redis 客戶端或創建新的
-        if redis_client is not None:
-            self.redis_client = redis_client
-        else:
-            self.redis_client = self._create_redis_client()
-
+        self.redis_client = redis_client or redis.Redis(
+            host='busy-piglet-47702.upstash.io',
+            port=6379,
+            password=os.getenv('REDIS_PASSWORD'),  # 從環境變數讀取密碼
+            db=0,
+            decode_responses=True,
+            ssl=True,  # Upstash 需要 SSL
+            ssl_cert_reqs=None
+        )
         self.lock = threading.Lock()
 
         # Redis key 用來存歷史紀錄
         self.history_key = "rate_limit_history"
-
-    def _create_redis_client(self):
-        """創建 Redis 連接"""
-        # 從環境變數獲取 Redis 配置
-        redis_host = os.getenv('REDIS_HOST', 'localhost')
-        redis_port = int(os.getenv('REDIS_PORT', 6379))
-        redis_password = os.getenv('REDIS_PASSWORD', None)
-        redis_db = int(os.getenv('REDIS_DB', 0))
-
-        return redis.Redis(
-            host=redis_host,
-            port=redis_port,
-            password=redis_password,
-            db=redis_db,
-            decode_responses=True,
-            socket_connect_timeout=10,
-            socket_keepalive=True,
-            socket_keepalive_options={},
-            retry_on_timeout=True
-        )
 
     def is_allowed(self, client_id):
         current_time = time.time()
@@ -70,7 +55,7 @@ class FixedWindowRateLimiter(BaseLimiter):
                 'status': '成功' if allowed else '拒絕',
                 'count_after': count,
                 'window_reset': window_reset,
-                'timestamp': time.time()
+                'timestamp': time.time()  # 用於排序和清理舊紀錄
             }
 
             # 將紀錄推到 Redis list 的左邊（最新的在前面）
@@ -145,27 +130,3 @@ class FixedWindowRateLimiter(BaseLimiter):
 
         except Exception as e:
             print(f"⚠️ Redis reset 失敗: {e}")
-
-    def get_redis_info(self):
-        """獲取當前使用的 Redis 實現信息"""
-        try:
-            info = self.redis_client.info()
-            redis_version = info.get('redis_version', 'unknown')
-            redis_mode = info.get('redis_mode', 'standalone')
-            used_memory = info.get('used_memory_human', 'unknown')
-
-            return {
-                'type': '真實 Redis',
-                'version': redis_version,
-                'mode': redis_mode,
-                'used_memory': used_memory,
-                'host': os.getenv('REDIS_HOST', 'localhost'),
-                'port': os.getenv('REDIS_PORT', '6379')
-            }
-        except Exception as e:
-            return {
-                'type': 'Redis',
-                'error': str(e),
-                'host': os.getenv('REDIS_HOST', 'localhost'),
-                'port': os.getenv('REDIS_PORT', '6379')
-            }
