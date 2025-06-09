@@ -5,9 +5,6 @@ import time
 import json
 from datetime import datetime
 from base_limiter import BaseLimiter
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 class FixedWindowRateLimiter(BaseLimiter):
