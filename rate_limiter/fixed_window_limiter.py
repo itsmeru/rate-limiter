@@ -5,6 +5,8 @@ import time
 import json
 from datetime import datetime
 from base_limiter import BaseLimiter
+from dotenv import load_dotenv
+load_dotenv()
 
 
 class FixedWindowRateLimiter(BaseLimiter):
@@ -31,47 +33,81 @@ class FixedWindowRateLimiter(BaseLimiter):
             raise e
 
     def _create_redis_connection(self):
-        """創建 Redis 連接，使用正確的 TLS 設定"""
+        """創建 Redis 連接，包含詳細的調試信息"""
         print("🔍 開始創建 Redis 連接...")
 
-        # 獲取 REDIS_URL
+        # 詳細檢查所有可能的配置來源
         redis_url = None
+
+        # 方式 1: Streamlit secrets
         try:
             import streamlit as st
             if hasattr(st, 'secrets'):
                 redis_url = st.secrets.get('REDIS_URL')
-        except:
-            pass
+                print(f"Streamlit secrets 中的 REDIS_URL: {'存在' if redis_url else '不存在'}")
+                if redis_url:
+                    print(f"URL 長度: {len(redis_url)}")
+            else:
+                redis_url = os.getenv('REDIS_URL')
+        except Exception as e:
+            print(f"讀取 Streamlit secrets 錯誤: {e}")
 
+        # 方式 2: 環境變數
         if not redis_url:
             redis_url = os.getenv('REDIS_URL')
+            print(f"環境變數中的 REDIS_URL: {'存在' if redis_url else '不存在'}")
 
+        # 方式 3: 硬編碼備用（僅用於測試）
         if not redis_url:
-            raise ValueError("❌ 無法找到 REDIS_URL 配置")
+            print("⚠️ 未找到 REDIS_URL，請檢查 Streamlit Cloud Secrets 設定")
+            print("💡 請確認 Secrets 格式：")
+            print('REDIS_URL = "redis://default:密碼@host:6379"')
 
-        print(f"Redis URL 前綴: {redis_url[:30]}...")
+            # 暫時拋出更詳細的錯誤
+            raise ValueError(
+                "❌ 無法找到 REDIS_URL 配置\n"
+                "請檢查 Streamlit Cloud 的 App Settings > Secrets 中是否正確設定了：\n"
+                'REDIS_URL = "redis://default:密碼@host:6379"'
+            )
 
-        # 由於 CLI 需要 --tls，我們需要手動解析 URL 並設定 SSL
+        print(f"使用 Redis URL: {redis_url[:30]}...")
+
+        # 嘗試連接
         try:
             from urllib.parse import urlparse
             parsed = urlparse(redis_url)
 
             print(f"解析結果: host={parsed.hostname}, port={parsed.port}")
 
-            # 為 Upstash 創建 Redis 連接，強制使用 SSL
-            client = redis.Redis(
-                host=parsed.hostname,
-                port=parsed.port or 6379,
-                password=parsed.password,
-                username=parsed.username or 'default',
-                ssl=True,                    # 強制使用 SSL，對應 CLI 的 --tls
-                ssl_check_hostname=False,    # 對 Upstash 很重要
-                ssl_cert_reqs=None,          # 不驗證證書
-                decode_responses=True,
-                socket_connect_timeout=30,
-                socket_timeout=30,
-                retry_on_timeout=True
-            )
+            # 檢查是否為 Railway Redis（通常不需要 SSL）
+            if 'rlwy.net' in redis_url:
+                print("🚂 檢測到 Railway Redis，使用非 SSL 連接")
+                client = redis.Redis(
+                    host=parsed.hostname,
+                    port=parsed.port or 6379,
+                    password=parsed.password,
+                    username=parsed.username or 'default',
+                    ssl=False,  # Railway Redis 通常不使用 SSL
+                    decode_responses=True,
+                    socket_connect_timeout=30,
+                    socket_timeout=30,
+                    retry_on_timeout=True
+                )
+            else:
+                print("🔒 使用 SSL 連接（Upstash 等）")
+                client = redis.Redis(
+                    host=parsed.hostname,
+                    port=parsed.port or 6379,
+                    password=parsed.password,
+                    username=parsed.username or 'default',
+                    ssl=True,
+                    ssl_check_hostname=False,
+                    ssl_cert_reqs=None,
+                    decode_responses=True,
+                    socket_connect_timeout=30,
+                    socket_timeout=30,
+                    retry_on_timeout=True
+                )
 
             print("🧪 測試連接...")
             result = client.ping()
