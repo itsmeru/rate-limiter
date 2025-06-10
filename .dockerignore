@@ -1,0 +1,91 @@
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Git directory
+.git/
+.gitignore
+
+# Docker files (no need to include in the image)
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.yaml
+docker-compose.override.yml
+
+# Documentation (usually not needed in production image)
+README.md
+*.md
+docs/
+LICENSE
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+
+# Testing files
+tests/
+test_*.py
+*_test.py
+.pytest_cache/
+.coverage
+.tox/
+htmlcov/
+coverage.xml
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Development tools
+.mypy_cache/
+.ruff_cache/
+.cursorignore
+.cursorindexingignore
+
+# Jupyter notebooks (if any)
+.ipynb_checkpoints
+*.ipynb
+
+# Package management files (already installed via requirements.txt)
+Pipfile
+Pipfile.lock
+poetry.lock
+pyproject.toml
+.pdm.toml
+
+# CI/CD files
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+
+# Local development environment files
+.env.local
+.env.development
+.env.test
