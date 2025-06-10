@@ -5,17 +5,11 @@ services:
       - "6379:6379"
     restart: unless-stopped
 
-  # Streamlit 應用
   app:
-    build: .
+    image: itsmeru/rate-limiter:latest
     container_name: rate_limiter_app
     ports:
       - "8501:8501"
     depends_on:
       - redis
-    environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-    volumes:
-      - .:/app
     restart: unless-stopped
